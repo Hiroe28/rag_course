@@ -80,7 +80,7 @@ LlamaIndex-QA-System
    streamlit run app\chat_ui.py
    ```
 
-   - ブラウザが開き、ユーザーはWeb UIを介してドキュメントに基づく質問を行うことができます。
+   - ブラウザが開き、ユーザーはWeb UIを介してドキュメントに基づく質問をできます。
 
 ## 環境変数設定
 
