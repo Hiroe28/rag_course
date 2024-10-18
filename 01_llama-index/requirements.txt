@@ -1,8 +1,0 @@
-streamlit
-langchain
-python-dotenv
-llama-index
-llama-index-embeddings-azure-openai
-llama-index-llms-azure-openai
-openpyxl
-docx2txt
