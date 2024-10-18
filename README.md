@@ -15,12 +15,7 @@ LlamaIndex-QA-System
 
 プロジェクト全体のセットアップ手順は以下の通りです。
 
-1. リポジトリをクローンします。
-
-   ```bash
-   git clone https://github.com/your-repository/LlamaIndex-QA-System.git
-   cd LlamaIndex-QA-System
-   ```
+1. リポジトリをクローン、またはコードをダウンロードします。
 
 2. 必要なパッケージをインストールします。
 
