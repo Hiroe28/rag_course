@@ -1,5 +1,5 @@
 import os
-from llama_index.core import VectorStoreIndex, SimpleDirectoryReader
+from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, Settings
 from dotenv import load_dotenv
 import logging
 import sys
@@ -22,6 +22,10 @@ def setup_index():
     
     # モデルとエンベディングを取得
     llm, embed_model = get_llm_and_embed_model()
+    
+    # グローバル設定を更新
+    Settings.llm = llm
+    Settings.embed_model = embed_model
     
     # ドキュメントの読み込み
     reader = SimpleDirectoryReader(input_dir=data_dir, recursive=True)
