@@ -9,7 +9,7 @@
 01_llama-index
 ├── data                # 読み込むドキュメントを配置
 └── app
-    ├── chat_cli.py     # CLI形式のUI
+    ├── chat_ui.py     #のUI
     ├── common_setup.py # LLMおよび設定の読み込み
     └── sample.py       # インデックスの生成およびクエリ処理
 ```
