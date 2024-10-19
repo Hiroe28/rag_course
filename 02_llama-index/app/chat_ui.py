@@ -1,4 +1,4 @@
-# chat_ui4.py
+# chat_ui.py
 import streamlit as st
 
 from common_setup import get_llm_and_embed_model, load_environment
