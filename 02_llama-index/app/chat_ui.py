@@ -1,9 +1,8 @@
 # chat_ui.py
 import streamlit as st
-
+from llama_index.core import Document, Settings
 from common_setup import get_llm_and_embed_model, load_environment
 from langchain.memory import ConversationBufferMemory
-from llama_index.core import Settings
 from llama_index.core.response_synthesizers.type import ResponseMode
 from rag import setup_rag
 from vector_save import load_existing_index
@@ -26,31 +25,34 @@ class ChatUI:
         Settings.embed_model = self.embed_model
 
         # キャッシュされたインデックスの読み込み
-        self.vector_index, self.keyword_index = load_cached_index()
+        self.vector_index = load_cached_index()
         
-        if self.vector_index is None or self.keyword_index is None:
+        if self.vector_index is None:
             st.error("インデックスが見つかりません。vector_save.pyを実行してインデックスを作成してください。")
             st.stop()
 
-        # RAG設定の初期化
+        # ドキュメントの準備
+        self.documents = [Document.from_dict(node.dict()) for node in self.vector_index.docstore.docs.values()]
+
+        # セッション状態の初期化
+        self.initialize_session_state()
+
+        # 初回のみクエリエンジンの設定を行う
+        if "query_engine" not in st.session_state:
+            self.setup_query_engine()
+        else:
+            # セッション状態からクエリエンジンを取得
+            self.query_engine = st.session_state.query_engine
+
+    def initialize_session_state(self):
         if "similarity_top_k" not in st.session_state:
             st.session_state.similarity_top_k = 5
         if "response_mode" not in st.session_state:
             st.session_state.response_mode = ResponseMode.COMPACT
         if "structured_answer_filtering" not in st.session_state:
             st.session_state.structured_answer_filtering = True
-        if "hybrid_mode" not in st.session_state:
-            st.session_state.hybrid_mode = "OR"
-        
-        self.query_engine = setup_rag(
-            self.vector_index,
-            self.keyword_index,
-            similarity_top_k=st.session_state.similarity_top_k,
-            response_mode=st.session_state.response_mode,
-            structured_answer_filtering=st.session_state.structured_answer_filtering,
-            hybrid_mode=st.session_state.hybrid_mode
-        )
-
+        if "use_auto_retriever" not in st.session_state:
+            st.session_state.use_auto_retriever = True
         if "temperature" not in st.session_state:
             st.session_state.temperature = 0.0
         if "language" not in st.session_state:
@@ -59,86 +61,124 @@ class ChatUI:
             st.session_state.role = "あなたは親切で知識豊富なAIアシスタントです。与えられたファイルの情報を基に正確に回答します。"
 
     def side(self):
-        st.sidebar.button("＋ 新しい会話を始める", key="clear", on_click=self.chat_reset)
-
         st.sidebar.title("設定")
         
-        st.session_state.temperature = st.sidebar.slider(
-            "Temperature:\n\n高いほど会話のランダム性が高くなる",
+        temperature = st.sidebar.slider(
+            "Temperature:",
             min_value=0.0,
             max_value=1.0,
             value=st.session_state.temperature,
             step=0.01,
+            help="高いほど会話のランダム性が高くなります。低い値では一貫性のある回答が、高い値では創造的な回答が得られやすくなります。"
         )
 
-        st.session_state.role = st.sidebar.text_area(
-            label="System Message:\n\n会話の前提として与えるAIの役割",
-            value=st.session_state.role
+        role = st.sidebar.text_area(
+            label="System Message:",
+            value=st.session_state.role,
+            help="AIアシスタントの役割や振る舞いを定義します。ここで指定した内容に基づいてAIが応答を生成します。"
         )
 
         languages = sorted(["Japanese", "English", "Chinese", "German", "French"])
-
-        st.session_state.language = st.sidebar.selectbox(
-            label="Language:\n\n指定した言語で返答を行いやすくなる",
+        language = st.sidebar.selectbox(
+            label="Language:",
             options=languages,
             index=languages.index(st.session_state.language),
+            help="AIアシスタントが応答を生成する際に使用する言語を指定します。"
         )
 
         # RAG設定
         st.sidebar.title("RAG設定")
 
-        hybrid_modes = ["AND", "OR"]
-        st.session_state.hybrid_mode = st.sidebar.selectbox(
-            "Hybrid Mode:\n\nベクトル検索とキーワード検索の組み合わせ方",
-            options=hybrid_modes,
-            index=hybrid_modes.index(st.session_state.hybrid_mode),
-        )
+        use_auto_retriever = st.sidebar.radio(
+            "検索方法:",
+            options=["自動検索", "再帰的検索"],
+            index=0 if st.session_state.use_auto_retriever else 1,
+            format_func=lambda x: x,
+            help="自動検索：AIが自動的にフィルターを選択します。再帰的検索：文書の階層構造を利用して検索します。"
+        ) == "自動検索"
 
-        st.session_state.similarity_top_k = st.sidebar.slider(
-            "Similarity Top K:\n\n検索する類似ドキュメントの数",
+        similarity_top_k = st.sidebar.slider(
+            "Similarity Top K:",
             min_value=1,
             max_value=20,
             value=st.session_state.similarity_top_k,
             step=1,
+            help="検索する類似ドキュメントの数を指定します。多いほど広範囲の情報を参照しますが、処理時間が長くなる可能性があります。"
         )
 
         response_modes = [mode.value for mode in ResponseMode]
-        st.session_state.response_mode = ResponseMode(st.sidebar.selectbox(
-            "Response Mode:\n\n回答生成のモード",
+        response_mode = ResponseMode(st.sidebar.selectbox(
+            "Response Mode:",
             options=response_modes,
             index=response_modes.index(st.session_state.response_mode.value),
+            help="回答生成のモードを指定します。各モードの特徴は以下の通りです：\n"
+                 "- refine: 各テキストチャンクを順に使用して回答を生成し、逐次的に洗練させます。詳細な回答が得られますが、LLM呼び出しが多くなります。\n"
+                 "- compact: テキストチャンクを大きな塊に結合してからrefineを適用します。refineより高速で、コンテキストウインドウを効率的に利用します。\n"
+                 "- simple_summaraize: 全テキストチャンクを1つに結合し、1回のLLM呼び出しで回答を生成します。コンテキストウインドウのサイズ制限に注意が必要です。\n"
+                 "- tree_summaraize: テキストチャンクから木構造のインデックスを構築し、クエリを考慮しながらボトムアップで要約します。\n"
+                 "- generation: コンテキストを無視し、LLMのみで回答を生成します。\n"
+                 "- no_text: 最終的な回答を生成せず、検索されたコンテキストノードのみを返します。\n"
+                 "- context_only: 全テキストチャンクを連結した文字列を返します。\n"
+                 "- accumulate: 各テキストチャンクに対して個別に回答を生成し、それらを連結します。\n"
+                 "- compact_accumulate: テキストチャンクを結合してからACCUMULATEを適用します。ACCUMULATEより高速です。"
         ))
 
-        st.session_state.structured_answer_filtering = st.sidebar.checkbox(
+        structured_answer_filtering = st.sidebar.checkbox(
             "Structured Answer Filtering",
             value=st.session_state.structured_answer_filtering,
-            help="構造化された回答のフィルタリングを行うかどうか"
+            help="回答の質を向上させるフィルタリング機能を有効にします。\n"
+                 "- 有効時：無関係な情報や「わかりません」といった回答を除外し、より適切な情報に焦点を当てます。\n"
+                 "- 特に'refine'や'compact'モードで効果的です。"
         )
+
+        # 設定変更の検出
+        settings_changed = (
+            temperature != st.session_state.temperature or
+            role != st.session_state.role or
+            language != st.session_state.language or
+            use_auto_retriever != st.session_state.use_auto_retriever or
+            similarity_top_k != st.session_state.similarity_top_k or
+            response_mode != st.session_state.response_mode or
+            structured_answer_filtering != st.session_state.structured_answer_filtering
+        )
+
+        if settings_changed:
+            st.sidebar.warning("設定が変更されました。適用するには「RAG設定を適用」ボタンを押してください。")
 
         # Azure OpenAI か通常の OpenAI かを表示
         st.sidebar.markdown(f"**使用中のサービス:** {'Azure OpenAI' if self.config['use_azure'] else 'OpenAI'}")
         st.sidebar.markdown(f"**モデル:** {self.config['chat_model']}")
 
-    def chat_reset(self):
-        st.session_state.messages = []
-        st.session_state.memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
-        
-        # インデックスを再作成するのではなく、既存のインデックスを読み込む
-        self.vector_index, self.keyword_index = load_existing_index()
-        
-        if self.vector_index is None or self.keyword_index is None:
-            st.error("インデックスが見つかりません。vector_save.pyを実行してインデックスを作成してください。")
-            st.stop()
-        
-        self.query_engine = setup_rag(
+        # RAG設定が変更された場合、クエリエンジンを再設定
+        if st.sidebar.button("RAG設定を適用"):
+            st.session_state.temperature = temperature
+            st.session_state.role = role
+            st.session_state.language = language
+            st.session_state.use_auto_retriever = use_auto_retriever
+            st.session_state.similarity_top_k = similarity_top_k
+            st.session_state.response_mode = response_mode
+            st.session_state.structured_answer_filtering = structured_answer_filtering
+            
+            self.setup_query_engine()
+            st.success("RAG設定が適用されました。")
+
+    def setup_query_engine(self):
+
+        self.query_engine, _ = setup_rag(
             self.vector_index,
-            self.keyword_index,
+            self.documents,
             similarity_top_k=st.session_state.similarity_top_k,
             response_mode=st.session_state.response_mode,
             structured_answer_filtering=st.session_state.structured_answer_filtering,
-            hybrid_mode=st.session_state.hybrid_mode
+            use_auto_retriever=st.session_state.use_auto_retriever,
+            system_message=st.session_state.role,
+            language=st.session_state.language,
+            temperature=st.session_state.temperature
         )
-        
+
+        # query_engine をセッション状態に保存
+        st.session_state.query_engine = self.query_engine
+
     def conversation(self):  
         if "messages" not in st.session_state:
             st.session_state.messages = []
@@ -162,8 +202,12 @@ class ChatUI:
                 response = self.query_engine.query(prompt)
                 ai_response = response.response
                 sources = response.source_nodes
+
+                if not ai_response.strip():
+                    ai_response = "申し訳ありません。その質問に対する適切な回答が見つかりませんでした。質問を別の方法で言い換えるか、より具体的な情報を提供していただけますか？"
+
             except Exception as e:
-                ai_response = "エラーが発生しました。"
+                ai_response = "申し訳ありません。回答の生成中にエラーが発生しました。しばらくしてからもう一度お試しください。"
                 sources = []
                 st.error(f"クエリ処理中にエラーが発生しました: {str(e)}")
 
@@ -201,7 +245,6 @@ class ChatUI:
 
 
 def main():
-    # load_dotenv(r"secret\.env", override=True)
     ui = ChatUI()
     ui.side()
     ui.conversation()
