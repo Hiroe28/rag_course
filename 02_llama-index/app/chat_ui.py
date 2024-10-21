@@ -186,16 +186,16 @@ class ChatUI:
             response_mode=st.session_state.response_mode,
             structured_answer_filtering=st.session_state.structured_answer_filtering,
             use_auto_retriever=st.session_state.use_auto_retriever,
-            use_keywords=st.session_state.use_keywords,  # 新しいパラメータ
+            use_keywords=st.session_state.use_keywords,
             system_message=st.session_state.role,
             language=st.session_state.language,
             temperature=st.session_state.temperature
         )
-
         # query_engine をセッション状態に保存
         st.session_state.query_engine = self.query_engine
+        
 
-    def conversation(self):  
+    def conversation(self):
         if "messages" not in st.session_state:
             st.session_state.messages = []
 
@@ -219,6 +219,16 @@ class ChatUI:
                 ai_response = response.response
                 sources = response.source_nodes
 
+                # デバッグ情報の出力
+                if st.session_state.use_keywords and st.session_state.use_auto_retriever:
+                    if hasattr(self.query_engine, '_custom_retriever') and hasattr(self.query_engine._custom_retriever, 'get_extracted_keywords'):
+                        extracted_keywords = self.query_engine._custom_retriever.get_extracted_keywords(prompt)
+                        st.info(f"抽出されたキーワード: {extracted_keywords}")
+                    else:
+                        st.warning("キーワード抽出機能が利用できません")
+                        st.info(f"query_engine type: {type(self.query_engine)}")
+                        st.info(f"retriever type: {type(self.query_engine._custom_retriever) if hasattr(self.query_engine, '_custom_retriever') else 'No retriever'}")
+
                 if not ai_response.strip():
                     ai_response = "申し訳ありません。その質問に対する適切な回答が見つかりませんでした。質問を別の方法で言い換えるか、より具体的な情報を提供していただけますか？"
 
@@ -231,14 +241,11 @@ class ChatUI:
                 st.write(ai_response)
 
             st.session_state.messages.append({"role": "assistant", "content": ai_response})
-
             st.session_state.memory.save_context({"input": prompt}, {"outputs": ai_response})
 
             if sources:
-
                 st.subheader("参照したチャンク情報:")
                 
-                # タブを使用してチャンク情報を表示
                 tabs = st.tabs([f"チャンク {i+1}" for i in range(len(sources))])
                 
                 for i, (tab, node) in enumerate(zip(tabs, sources)):
@@ -248,17 +255,21 @@ class ChatUI:
                             st.metric(label="類似度スコア", value=f"{node.score:.4f}")
                         with col2:
                             st.info(f"**ファイル名:** {node.metadata.get('filename', '不明')}")
-                        
-                        # サマリーの表示を修正
-                        summary = node.metadata.get('summary', '要約なし')
-                        if summary != '要約なし':
-                            st.success(f"**要約:** {summary}")
+                    
+                        # ファイルレベルのサマリー表示
+                        file_summary = node.metadata.get('summary', '要約なし')
+                        if file_summary != '要約なし':
+                            st.success(f"**ファイル要約:** {file_summary}")
+                        else:
+                            st.warning("このファイルには要約がありません。")
+
+                        # チャンク単位のサマリー表示
+                        chunk_summary = node.metadata.get('chunk_summary', '要約なし')
+                        if chunk_summary != '要約なし':
+                            st.success(f"**チャンク要約:** {chunk_summary}")
                         else:
                             st.warning("このチャンクには要約がありません。")
-                        
-                        with st.expander("チャンクの内容を表示"):
-                            st.code(node.text, language="plaintext")
-
+                                
 
 def main():
     ui = ChatUI()
@@ -267,3 +278,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
