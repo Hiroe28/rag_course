@@ -64,17 +64,25 @@ LlamaIndex-QA-System
 02_llama-index
 ├── data                # 読み込むドキュメントを配置
 └── app
-    ├── chat_ui.py     # UI
+    ├── chat_ui.py     # RAGのUIツール
     ├── common_setup.py # LLMおよび設定の読み込み
     ├── rag.py          # RAGのセットアップおよびカスタムリトリーバー
-    └── vector_save.py  # インデックスの生成および保存
+    ├── vector_save.py  # インデックスの生成および保存
+    └── vector_saveUI.py  # vector_save.pyのUIツール
 ```
 
 #### 使い方
 
 1. `data` フォルダにドキュメントを配置します。
 2. `.env` ファイルを作成し、APIキーやモデル情報を設定します。
-3. 02_llama-indexで、以下のコマンドでWeb UIを起動します。
+3. 02_llama-indexで実行vector_save.pyかvector_saveUI.pyを実行し、ベクトルインデックスを生成します。
+   ```bash
+   python app\vector_save.py
+   ```
+   ```bash
+   streamlit run app\vector_saveUI.py
+   ```
+4. 02_llama-indexで、以下のコマンドでWeb UIを起動します。
 
    ```bash
    streamlit run app\chat_ui.py
