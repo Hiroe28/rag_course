@@ -1,15 +1,14 @@
 # chat_ui.py
 import streamlit as st
-from llama_index.core import Document, Settings
+from llama_index.core import Settings
 from common_setup import get_llm_and_embed_model, load_environment
 from langchain.memory import ConversationBufferMemory
 from llama_index.core.response_synthesizers.type import ResponseMode
-from rag import setup_rag
-from vector_save import load_existing_index
+from rag import setup_rag, load_index_and_documents
 
 @st.cache_resource
-def load_cached_index():
-    return load_existing_index()
+def load_cached_index_and_documents():
+    return load_index_and_documents()
 
 class ChatUI:
 
@@ -24,15 +23,8 @@ class ChatUI:
         Settings.llm = self.llm
         Settings.embed_model = self.embed_model
 
-        # キャッシュされたインデックスの読み込み
-        self.vector_index = load_cached_index()
-        
-        if self.vector_index is None:
-            st.error("インデックスが見つかりません。vector_save.pyを実行してインデックスを作成してください。")
-            st.stop()
-
-        # ドキュメントの準備
-        self.documents = [Document.from_dict(node.dict()) for node in self.vector_index.docstore.docs.values()]
+        # キャッシュされたインデックスとドキュメントのロード
+        self.vector_index, self.documents = load_cached_index_and_documents()
 
         # セッション状態の初期化
         self.initialize_session_state()
