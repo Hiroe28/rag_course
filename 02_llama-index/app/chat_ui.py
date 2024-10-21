@@ -59,6 +59,9 @@ class ChatUI:
             st.session_state.language = "Japanese"
         if "role" not in st.session_state:
             st.session_state.role = "あなたは親切で知識豊富なAIアシスタントです。与えられたファイルの情報を基に正確に回答します。"
+        if "use_keywords" not in st.session_state:
+            st.session_state.use_keywords = False
+
 
     def side(self):
         st.sidebar.title("設定")
@@ -96,6 +99,17 @@ class ChatUI:
             format_func=lambda x: x,
             help="自動検索：AIが自動的にフィルターを選択します。再帰的検索：文書の階層構造を利用して検索します。"
         ) == "自動検索"
+
+        use_keywords = st.sidebar.checkbox(
+            "キーワード検索を使用",
+            value=st.session_state.use_keywords,
+            help="キーワードを使用して検索精度を向上させます。自動検索モードでのみ有効です。"
+        )
+        # キーワード検索は自動検索モードでのみ有効にする
+        if not use_auto_retriever:
+            use_keywords = False
+            st.sidebar.info("キーワード検索は自動検索モードでのみ使用できます。")
+
 
         similarity_top_k = st.sidebar.slider(
             "Similarity Top K:",
@@ -137,6 +151,7 @@ class ChatUI:
             role != st.session_state.role or
             language != st.session_state.language or
             use_auto_retriever != st.session_state.use_auto_retriever or
+            use_keywords != st.session_state.use_keywords or
             similarity_top_k != st.session_state.similarity_top_k or
             response_mode != st.session_state.response_mode or
             structured_answer_filtering != st.session_state.structured_answer_filtering
@@ -155,6 +170,7 @@ class ChatUI:
             st.session_state.role = role
             st.session_state.language = language
             st.session_state.use_auto_retriever = use_auto_retriever
+            st.session_state.use_keywords = use_keywords
             st.session_state.similarity_top_k = similarity_top_k
             st.session_state.response_mode = response_mode
             st.session_state.structured_answer_filtering = structured_answer_filtering
@@ -163,7 +179,6 @@ class ChatUI:
             st.success("RAG設定が適用されました。")
 
     def setup_query_engine(self):
-
         self.query_engine, _ = setup_rag(
             self.vector_index,
             self.documents,
@@ -171,6 +186,7 @@ class ChatUI:
             response_mode=st.session_state.response_mode,
             structured_answer_filtering=st.session_state.structured_answer_filtering,
             use_auto_retriever=st.session_state.use_auto_retriever,
+            use_keywords=st.session_state.use_keywords,  # 新しいパラメータ
             system_message=st.session_state.role,
             language=st.session_state.language,
             temperature=st.session_state.temperature
