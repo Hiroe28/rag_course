@@ -66,7 +66,7 @@ def setup_rag(
     similarity_top_k: int = 5,
     response_mode: ResponseMode = ResponseMode.COMPACT,
     structured_answer_filtering: bool = True,
-    use_auto_retriever: bool = False,
+    use_auto_retriever: bool = True,
     system_message: str = "",
     language: str = "Japanese",
     temperature: float = 0.0
