@@ -248,10 +248,35 @@ def load_existing_index():
 
 
 if __name__ == "__main__":
-    # サマリーを生成せずに実行（デフォルト）
-    # python app\vector_save.py --chunk-size 4096 --chunk-overlap 100
-    # サマリーを生成する場合
-    # python app\vector_save.py --summarize --chunk-size 4096 --chunk-overlap 100
+    # このプログラムは、テキストデータをベクトルインデックスとして保存・更新します。
+    # 使用可能な引数とその説明、およびコマンドの例は以下の通りです。
+
+    # 1. --summarize
+    #    ドキュメントのサマリー（要約）を生成するかどうかを指定します。
+    #    デフォルトではサマリーは生成されませんが、このフラグを追加することで、
+    #    ドキュメントの内容を簡潔に要約します。
+    #    例:
+    #        python app\vector_save.py --summarize --chunk-size 4096 --chunk-overlap 100
+    #    この例では、サマリーを生成し、チャンクサイズを4096、チャンクオーバーラップを100に設定しています。
+    #
+    # 2. --chunk-size
+    #    ドキュメントをチャンク（分割された小さな部分）に分割する際のサイズを指定します。
+    #    チャンクのサイズは文字数で指定されます。デフォルト値は1024です。
+    # 3. --chunk-overlap
+    #    チャンクを分割する際に、隣り合うチャンクの重なり部分のサイズを指定します。
+    #    これにより、文脈を保ちながらテキストを分割できます。デフォルト値は40です。
+    #    例:
+    #        python app\vector_save.py --chunk-size 4096 --chunk-overlap 100
+    #    この例では、チャンクサイズを2048に設定して実行します。
+    #
+    # 4. --force-update
+    #    既存のインデックスがあっても、それを無視して強制的に再作成・更新するオプションです。
+    #    これを使うと、以前と同じファイルがあっても再度インデックスを更新します。
+    #    例:
+    #        python app\vector_save.py --force-update --chunk-size 4096 --chunk-overlap 100
+    #    この例では、インデックスの再作成を強制し、チャンクサイズとオーバーラップを指定して実行します。
+
+
     parser = argparse.ArgumentParser(description="Update vector index with customizable options")
     parser.add_argument("--summarize", action="store_true", help="Generate summaries for documents")
     parser.add_argument("--chunk-size", type=int, default=1024, help="Chunk size for text splitting")
