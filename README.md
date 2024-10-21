@@ -1,7 +1,7 @@
 
 # LlamaIndex QA System Project
 
-このプロジェクトは、LlamaIndexを使用したQAシステムの2つのサンプル実装を提供します。`01_llama-index` は基本的なCLIインターフェースで、`02_llama-index` はWebベースのUIを備えています。どちらも、ユーザーがアップロードしたドキュメントに基づいて質問に対する回答を生成するRetrieval-Augmented Generation (RAG) システムです。
+このプロジェクトは、LlamaIndexを使用したQAシステムの2つのサンプル実装を提供します。`01_llama-index` 、`02_llama-index` はWebベースのUIを備えています。どちらも、ユーザーがアップロードしたドキュメントに基づいて質問に対する回答を生成するRetrieval-Augmented Generation (RAG) システムです。
 
 ## ディレクトリ構造
 
