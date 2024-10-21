@@ -18,6 +18,7 @@ from llama_index.core import (
     load_index_from_storage,
     Document
 )
+from llama_index.core.extractors import KeywordExtractor
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.response_synthesizers import get_response_synthesizer
 
@@ -53,7 +54,7 @@ def create_new_index():
     vector_index.set_index_id("vector_index")
     return vector_index
 
-def create_or_update_index(summarize=False, chunk_size=1024, chunk_overlap=40, force_update=False):
+def create_or_update_index(summarize=False, extract_keywords=False, num_keywords=10, chunk_size=1024, chunk_overlap=40, force_update=False):
     llm, embed_model = get_llm_and_embed_model()
     Settings.llm = llm
     Settings.embed_model = embed_model
@@ -127,6 +128,8 @@ def create_or_update_index(summarize=False, chunk_size=1024, chunk_overlap=40, f
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap
     )
+    
+    keyword_extractor = KeywordExtractor(keywords=num_keywords, llm=llm) if extract_keywords else None
 
     for filename, doc in docs_by_filename.items():
         current_mod_time = doc.metadata['modification_time']
@@ -137,12 +140,18 @@ def create_or_update_index(summarize=False, chunk_size=1024, chunk_overlap=40, f
                     'modification_time': current_mod_time,
                     'chunks': 0,
                     'total_chars': 0,
-                    'summary': ''
+                    'summary': '',
+                    'keywords': []
                 }
             
             if summarize and not file_metadata[filename]['summary']:
                 file_metadata[filename]['summary'] = generate_summary(doc, llm)
                 doc.metadata['summary'] = file_metadata[filename]['summary']
+
+            if extract_keywords:
+                keywords = keyword_extractor.extract([doc])[0]
+                file_metadata[filename]['keywords'] = keywords
+                doc.metadata['keywords'] = keywords
 
             # ドキュメントをチャンクに分割
             chunks = text_splitter.split_text(doc.text)
@@ -226,10 +235,21 @@ def display_metadata():
         with open(METADATA_FILE, 'r', encoding='utf-8') as f:
             metadata = json.load(f)
         
-        print("ファイル名\t最終更新日時\tチャンク数\t合計文字数\tサマリー")
-        print("-" * 120)
+        print("ファイル名\t最終更新日時\tチャンク数\t合計文字数\tサマリー\tキーワード")
+        print("-" * 140)
         for filename, info in metadata.items():
-            print(f"{filename}\t{datetime.fromtimestamp(info['modification_time']).strftime('%Y-%m-%d %H:%M:%S')}\t{info['chunks']}\t{info['total_chars']}\t{info['summary'][:50]}...")
+            keywords = info.get('keywords', [])
+            if isinstance(keywords, dict):
+                # キーワードが辞書型の場合、キーを使用
+                keywords = list(keywords.keys())
+            elif not isinstance(keywords, list):
+                # リストでない場合、空リストに設定
+                keywords = []
+            
+            keyword_str = ", ".join(keywords[:5])  # 最初の5つのキーワードのみ表示
+            summary = info.get('summary', '')[:50] + "..." if info.get('summary') else ''
+            
+            print(f"{filename}\t{datetime.fromtimestamp(info['modification_time']).strftime('%Y-%m-%d %H:%M:%S')}\t{info.get('chunks', 0)}\t{info.get('total_chars', 0)}\t{summary}\t{keyword_str}")
     else:
         print("\nメタデータファイルが見つかりません。")
 
@@ -278,26 +298,27 @@ if __name__ == "__main__":
 
 
     parser = argparse.ArgumentParser(description="Update vector index with customizable options")
-    parser.add_argument("--summarize", action="store_true", help="Generate summaries for documents")
     parser.add_argument("--chunk-size", type=int, default=1024, help="Chunk size for text splitting")
     parser.add_argument("--chunk-overlap", type=int, default=40, help="Chunk overlap for text splitting")
+    parser.add_argument("--extract-keywords", action="store_true", help="Extract keywords from documents")
+    parser.add_argument("--num-keywords", type=int, default=10, help="Number of keywords to extract")
+    parser.add_argument("--summarize", action="store_true", help="Generate summaries for documents")
     parser.add_argument("--force-update", action="store_true", help="Force update the index even if it exists")
     args = parser.parse_args()
 
     try:
         vector_index, file_metadata = create_or_update_index(
-            summarize=args.summarize,
             chunk_size=args.chunk_size,
             chunk_overlap=args.chunk_overlap,
+            extract_keywords=args.extract_keywords,
+            num_keywords=args.num_keywords,
+            summarize=args.summarize,
             force_update=args.force_update
         )
         if vector_index:
             print("インデックスの作成または更新が正常に完了しました。")
             save_file_metadata(file_metadata)
             display_metadata()
-
-            # rag_engine = setup_rag(vector_index)
-            # # ここでrag_engineを使用して質問に回答することができます
         else:
             print("インデックスの作成または更新に失敗しました。")
     except Exception as e:
