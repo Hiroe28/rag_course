@@ -30,21 +30,30 @@ def load_existing_index():
         logger.error(f"Error loading index: {e}")
         return None
 
-def create_auto_retriever(vector_index: VectorStoreIndex, similarity_top_k: int) -> VectorIndexAutoRetriever:
+def create_auto_retriever(vector_index: VectorStoreIndex, similarity_top_k: int, use_keywords: bool) -> VectorIndexAutoRetriever:
     vector_store_info = VectorStoreInfo(
         content_info="Document content related to various topics",
         metadata_info=[
             MetadataInfo(name="filename", type="str", description="Name of the source file"),
             MetadataInfo(name="modification_time", type="float", description="Last modification time of the file"),
-            MetadataInfo(name="summary", type="str", description="Summary of the document content")
+            MetadataInfo(name="summary", type="str", description="Summary of the document content"),
+            MetadataInfo(name="keywords", type="list", description="Keywords extracted from the document")
         ]
     )
 
-    return VectorIndexAutoRetriever(
+    retriever = VectorIndexAutoRetriever(
         index=vector_index,
         vector_store_info=vector_store_info,
         similarity_top_k=similarity_top_k
     )
+
+    if use_keywords:
+        retriever.keyword_match_threshold = 0.5  # この値は調整可能
+        retriever.keyword_extraction_threshold = 0.7  # キーワード抽出のしきい値を設定
+    else:
+        retriever.keyword_match_threshold = None
+        retriever.keyword_extraction_threshold = None
+    return retriever
 
 def create_recursive_retriever(vector_index: VectorStoreIndex, documents: List[Document], similarity_top_k: int) -> RecursiveRetriever:
     top_retriever = vector_index.as_retriever(similarity_top_k=similarity_top_k)
@@ -67,6 +76,7 @@ def setup_rag(
     response_mode: ResponseMode = ResponseMode.COMPACT,
     structured_answer_filtering: bool = True,
     use_auto_retriever: bool = True,
+    use_keywords: bool = False,
     system_message: str = "",
     language: str = "Japanese",
     temperature: float = 0.0
@@ -85,7 +95,7 @@ def setup_rag(
     file_metadata = load_file_metadata()
 
     if use_auto_retriever:
-        retriever = create_auto_retriever(vector_index, similarity_top_k)
+        retriever = create_auto_retriever(vector_index, similarity_top_k, use_keywords)
     else:
         retriever = create_recursive_retriever(vector_index, documents, similarity_top_k)
 
@@ -107,7 +117,8 @@ def run_rag(
     similarity_top_k: int = 5,
     response_mode: ResponseMode = ResponseMode.COMPACT,
     structured_answer_filtering: bool = True,
-    use_auto_retriever: bool = False
+    use_auto_retriever: bool = False,
+    use_keywords: bool = False  # 新しいパラメータ
 ):
     vector_index = load_existing_index()
     if vector_index is None:
@@ -121,9 +132,9 @@ def run_rag(
         similarity_top_k=similarity_top_k,
         response_mode=response_mode,
         structured_answer_filtering=structured_answer_filtering,
-        use_auto_retriever=use_auto_retriever
+        use_auto_retriever=use_auto_retriever,
+        use_keywords=use_keywords  # 新しいパラメータを渡す
     )
-
     response = query_engine.query(query)
     
     logger.info(f"Query: {query}")
@@ -143,12 +154,19 @@ def get_document_summaries(index):
 
 if __name__ == "__main__":
     query = "文書の主要なトピックは何ですか？"
-    use_auto_retriever = True  # ここでTrue/Falseを切り替えて、自動検索または再帰的検索を選択できます
-    response, file_metadata = run_rag(query, use_auto_retriever=use_auto_retriever)
+    use_auto_retriever = True
+    use_keywords = True  # キーワードを使用するかどうかを指定
+    response, file_metadata = run_rag(
+        query, 
+        use_auto_retriever=use_auto_retriever,
+        use_keywords=use_keywords
+    )
+    
     if response:
         print(f"Query: {query}")
         print(f"Response: {response}")
         print(f"\nRetrieval Method: {'Auto' if use_auto_retriever else 'Recursive'}")
+        print(f"Using Keywords: {'Yes' if use_keywords else 'No'}")
         print("\nDocument Summaries:")
         for filename, info in file_metadata.items():
             print(f"Filename: {filename}")
