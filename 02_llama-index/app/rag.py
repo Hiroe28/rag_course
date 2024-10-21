@@ -1,6 +1,6 @@
 #rag.py
 import logging
-from typing import List, Dict, Any
+from typing import List, Tuple
 from llama_index.core import (
     VectorStoreIndex,
     Document,
@@ -12,12 +12,20 @@ from llama_index.core import get_response_synthesizer
 from llama_index.core.response_synthesizers import ResponseMode
 from llama_index.core.vector_stores.types import VectorStoreInfo, MetadataInfo
 from common_setup import get_llm_and_embed_model
-from vector_save import PERSIST_DIR, load_file_metadata
+from vector_save import PERSIST_DIR, load_file_metadata, load_existing_index
 from llama_index.core.extractors import KeywordExtractor
-import os
+
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+
+def load_index_and_documents() -> Tuple[VectorStoreIndex, List[Document]]:
+    vector_index = load_existing_index()
+    if vector_index is None:
+        raise ValueError("インデックスが見つかりません。vector_save.pyを実行してインデックスを作成してください。")
+    
+    documents = [Document.from_dict(node.dict()) for node in vector_index.docstore.docs.values()]
+    return vector_index, documents
 
 def create_auto_retriever(vector_index: VectorStoreIndex, similarity_top_k: int, use_keywords: bool, llm) -> VectorIndexAutoRetriever:
     vector_store_info = VectorStoreInfo(
@@ -43,8 +51,17 @@ def create_auto_retriever(vector_index: VectorStoreIndex, similarity_top_k: int,
             logger.debug(f"Extracting keywords for query: {query}")
             try:
                 extracted = keyword_extractor.extract([Document(text=query)])
-                logger.debug(f"Extracted keywords: {extracted}")
-                return extracted[0].get("excerpt_keywords", "").split(", ")
+                raw_keywords = extracted[0].get("excerpt_keywords", "").split(", ")
+                
+                # キーワードの後処理
+                processed_keywords = [
+                    kw for kw in raw_keywords 
+                    if 2 < len(kw) < 20  # 長さの制限
+                ]
+                processed_keywords = list(set(processed_keywords))  # 重複の削除
+                
+                logger.debug(f"Extracted keywords: {processed_keywords}")
+                return processed_keywords
             except Exception as e:
                 logger.error(f"Error extracting keywords: {e}")
                 return []
@@ -161,4 +178,3 @@ def run_rag(
 
     return response, query_engine, file_metadata
 
-# テスト用のメイン関数は省略
