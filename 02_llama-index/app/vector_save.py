@@ -23,7 +23,8 @@ from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.response_synthesizers import get_response_synthesizer
 
 # ログ設定
-logging.basicConfig(level=logging.INFO)
+# logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
 # パス設定
@@ -54,7 +55,8 @@ def create_new_index():
     vector_index.set_index_id("vector_index")
     return vector_index
 
-def create_or_update_index(summarize=False, extract_keywords=False, num_keywords=10, chunk_size=1024, chunk_overlap=40, force_update=False):
+
+def create_or_update_index(summarize=False, summary_level='file', extract_keywords=False, num_keywords=10, chunk_size=1024, chunk_overlap=40, force_update=False):
     llm, embed_model = get_llm_and_embed_model()
     Settings.llm = llm
     Settings.embed_model = embed_model
@@ -121,7 +123,6 @@ def create_or_update_index(summarize=False, extract_keywords=False, num_keywords
             existing_doc = docs_by_filename[filename]
             existing_doc.text += "\n\n" + doc.text
             existing_doc.metadata['num_sections'] = existing_doc.metadata.get('num_sections', 1) + 1
-            # logger.info(f"Merged duplicate section for filename: {filename}. Total sections: {existing_doc.metadata['num_sections']}")
 
     text_splitter = SentenceSplitter(
         separator='。',
@@ -143,28 +144,45 @@ def create_or_update_index(summarize=False, extract_keywords=False, num_keywords
                     'summary': '',
                     'keywords': []
                 }
-            
-            if summarize and not file_metadata[filename]['summary']:
-                file_metadata[filename]['summary'] = generate_summary(doc, llm)
-                doc.metadata['summary'] = file_metadata[filename]['summary']
+
+            if summarize:
+                if summary_level == 'file':
+                    file_metadata[filename]['summary'] = generate_summary(doc, llm)
+                    doc.metadata['summary'] = file_metadata[filename]['summary']
+                elif summary_level == 'chunk':
+                    file_metadata[filename]['chunk_summaries'] = []
+                    for chunk in chunks:
+                        chunk_summary = generate_chunk_summary(chunk, llm)
+                        chunk_metadata['chunk_summary'] = chunk_summary
+                        file_metadata[filename]['chunk_summaries'].append(chunk_summary)
 
             if extract_keywords:
                 keywords = keyword_extractor.extract([doc])[0]
-                file_metadata[filename]['keywords'] = keywords
-                doc.metadata['keywords'] = keywords
+                # キーワードを直接リストとして保存
+                file_metadata[filename]['keywords'] = list(keywords.values())[0] if isinstance(keywords, dict) else keywords
+                doc.metadata['keywords'] = file_metadata[filename]['keywords']
+            else:
+                file_metadata[filename]['keywords'] = []
 
             # ドキュメントをチャンクに分割
             chunks = text_splitter.split_text(doc.text)
             num_chunks = len(chunks)
-            total_chars = sum(len(chunk) for chunk in chunks)  # 文字数で計算
+            total_chars = sum(len(chunk) for chunk in chunks)
 
             # 各チャンクをノードとして作成
             nodes = []
-            for chunk in chunks:
-                node_id = generate_consistent_id(filename, chunk)
-                node = Document(text=chunk, metadata=doc.metadata, id_=node_id)
+            for i, chunk in enumerate(chunks):
+                chunk_id = generate_consistent_id(filename, chunk)
+                chunk_metadata = doc.metadata.copy()
+
+                if summarize and summary_level == 'chunk':
+                    chunk_summary = generate_chunk_summary(chunk, llm)
+                    chunk_metadata['chunk_summary'] = chunk_summary
+                    file_metadata[filename]['chunk_summaries'].append(chunk_summary)
+
+                node = Document(text=chunk, metadata=chunk_metadata, id_=chunk_id)
                 nodes.append(node)
-                document_store[node_id] = node  # document_storeを更新
+                document_store[chunk_id] = node
 
             # ノードをインデックスに挿入
             vector_index.insert_nodes(nodes)
@@ -230,26 +248,46 @@ def generate_summary(doc, llm):
     return str(summary_response)
 
 
+def generate_chunk_summary(chunk, llm):
+    """チャンクの要約を生成する関数"""
+    summary_template = (
+        "以下の文章の要約を50字程度で作成してください。重要なポイントを簡潔に説明してください：\n\n{context}"
+    )
+    Settings.llm = llm
+    
+    summary_index = SummaryIndex.from_documents([Document(text=chunk)])
+    summary_query_engine = summary_index.as_query_engine(
+        response_synthesizer=get_response_synthesizer(
+            summary_template=summary_template,
+        )
+    )
+    
+    summary_response = summary_query_engine.query("この文章の要約を50文字程度で作成してください。")
+    return str(summary_response)
+
+
 def display_metadata():
     if os.path.exists(METADATA_FILE):
         with open(METADATA_FILE, 'r', encoding='utf-8') as f:
             metadata = json.load(f)
         
-        print("ファイル名\t最終更新日時\tチャンク数\t合計文字数\tサマリー\tキーワード")
-        print("-" * 140)
+        print("ファイル名\t最終更新日時\tチャンク数\t合計文字数\tサマリー\tキーワード\tチャンクサマリー")
+        print("-" * 160)
         for filename, info in metadata.items():
             keywords = info.get('keywords', [])
             if isinstance(keywords, dict):
-                # キーワードが辞書型の場合、キーを使用
                 keywords = list(keywords.keys())
             elif not isinstance(keywords, list):
-                # リストでない場合、空リストに設定
                 keywords = []
             
-            keyword_str = ", ".join(keywords[:5])  # 最初の5つのキーワードのみ表示
+            keyword_str = ", ".join(keywords[:5])
             summary = info.get('summary', '')[:50] + "..." if info.get('summary') else ''
             
-            print(f"{filename}\t{datetime.fromtimestamp(info['modification_time']).strftime('%Y-%m-%d %H:%M:%S')}\t{info.get('chunks', 0)}\t{info.get('total_chars', 0)}\t{summary}\t{keyword_str}")
+            # チャンクサマリーの表示（最初の3つのみ）
+            chunk_summaries = info.get('chunk_summaries', [])
+            chunk_summary_str = "; ".join(chunk_summaries[:3]) + "..." if chunk_summaries else 'なし'
+            
+            print(f"{filename}\t{datetime.fromtimestamp(info['modification_time']).strftime('%Y-%m-%d %H:%M:%S')}\t{info.get('chunks', 0)}\t{info.get('total_chars', 0)}\t{summary}\t{keyword_str}\t{chunk_summary_str}")
     else:
         print("\nメタデータファイルが見つかりません。")
 
@@ -275,26 +313,42 @@ if __name__ == "__main__":
     #    ドキュメントのサマリー（要約）を生成するかどうかを指定します。
     #    デフォルトではサマリーは生成されませんが、このフラグを追加することで、
     #    ドキュメントの内容を簡潔に要約します。
-    #    例:
-    #        python app\vector_save.py --summarize --chunk-size 4096 --chunk-overlap 100
-    #    この例では、サマリーを生成し、チャンクサイズを4096、チャンクオーバーラップを100に設定しています。
     #
-    # 2. --chunk-size
+    # 2. --summary-level {file,chunk}
+    #    サマリーの生成レベルを指定します。'file'はファイル単位、'chunk'はチャンク単位でサマリーを生成します。
+    #    デフォルトは'file'です。--summarizeフラグと併せて使用します。
+    #    例:
+    #        python app\vector_save.py --summarize --summary-level chunk
+    #    この例では、チャンク単位でサマリーを生成します。
+    #
+    # 3. --chunk-size
     #    ドキュメントをチャンク（分割された小さな部分）に分割する際のサイズを指定します。
     #    チャンクのサイズは文字数で指定されます。デフォルト値は1024です。
-    # 3. --chunk-overlap
+    #
+    # 4. --chunk-overlap
     #    チャンクを分割する際に、隣り合うチャンクの重なり部分のサイズを指定します。
     #    これにより、文脈を保ちながらテキストを分割できます。デフォルト値は40です。
     #    例:
     #        python app\vector_save.py --chunk-size 4096 --chunk-overlap 100
-    #    この例では、チャンクサイズを2048に設定して実行します。
+    #    この例では、チャンクサイズを4096に、チャンクオーバーラップを100に設定して実行します。
     #
-    # 4. --force-update
+    # 5. --extract-keywords
+    #    ドキュメントからキーワードを抽出するかどうかを指定します。
+    #    このフラグを追加すると、各ドキュメントの主要なキーワードが抽出されます。
+    #
+    # 6. --num-keywords
+    #    抽出するキーワードの数を指定します。デフォルト値は10です。
+    #    --extract-keywordsフラグと併せて使用します。
+    #    例:
+    #        python app\vector_save.py --extract-keywords --num-keywords 15
+    #    この例では、各ドキュメントから15個のキーワードを抽出します。
+    #
+    # 7. --force-update
     #    既存のインデックスがあっても、それを無視して強制的に再作成・更新するオプションです。
     #    これを使うと、以前と同じファイルがあっても再度インデックスを更新します。
     #    例:
-    #        python app\vector_save.py --force-update --chunk-size 4096 --chunk-overlap 100
-    #    この例では、インデックスの再作成を強制し、チャンクサイズとオーバーラップを指定して実行します。
+    #        python app\vector_save.py --force-update --summarize --summary-level file
+    #    この例では、インデックスの再作成を強制し、ファイル単位のサマリーを生成します。
 
 
     parser = argparse.ArgumentParser(description="Update vector index with customizable options")
@@ -303,16 +357,19 @@ if __name__ == "__main__":
     parser.add_argument("--extract-keywords", action="store_true", help="Extract keywords from documents")
     parser.add_argument("--num-keywords", type=int, default=10, help="Number of keywords to extract")
     parser.add_argument("--summarize", action="store_true", help="Generate summaries for documents")
+    parser.add_argument("--summary-level", choices=['file', 'chunk'], default='file', 
+                        help="Level of summarization: 'file' for file-level summaries, 'chunk' for chunk-level summaries")
     parser.add_argument("--force-update", action="store_true", help="Force update the index even if it exists")
     args = parser.parse_args()
 
     try:
         vector_index, file_metadata = create_or_update_index(
-            chunk_size=args.chunk_size,
-            chunk_overlap=args.chunk_overlap,
+            summarize=args.summarize,
+            summary_level=args.summary_level,
             extract_keywords=args.extract_keywords,
             num_keywords=args.num_keywords,
-            summarize=args.summarize,
+            chunk_size=args.chunk_size,
+            chunk_overlap=args.chunk_overlap,
             force_update=args.force_update
         )
         if vector_index:
